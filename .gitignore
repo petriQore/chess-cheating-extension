@@ -1,2 +1,4 @@
 back/*
 !back/index.js
+!back/package.json
+!back/package-lock.json
