@@ -13,9 +13,14 @@ const port = 3000;
 
 app.get('/send-data', (req, res) => {
     const moves = req.query.moves.trim().split(" ");
+    // console.log("Moves: ", moves);
+    if (!moves || moves.length === 1) {
+        res.json({ error: 'Play the 1st move!' });
+        return;
+    } else{
     analyzePosition(moves).then(result => {
         res.json(result);
-    });
+    });}
 });
 
 app.listen(port, () => {
@@ -38,55 +43,60 @@ app.listen(port, () => {
 const zip = (a, b) => a.map((k, i) => [k, b[i]]);
 
 async function analyzePosition(moves) {
-    if (!stockfish) {
-      throw new Error('errrrrrrr');
-    }
-  
-    const chess = new Chess();
-    moves.forEach(move => {
+  if (!stockfish) {
+      throw new Error('Stockfish process not available');
+  }
+
+  const chess = new Chess();
+  moves.forEach(move => {
       chess.move(move);
   });
   const fen = chess.fen();
 
-
-    return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
       const score = [];
       const nextmove = [];
       
-      stockfish.stdout.on('data', (data) => {
-        const output = data.toString();
-        // console.log('output:', output);  // comment lme
-        
-        if (output.includes('info depth 15')) {
+      const onData = (data) => {
+          const output = data.toString();
 
-          const scoreMatches = output.matchAll(/score\s(\S+\s*\S*)/g);
-          for (const match of scoreMatches) {
-            score.push(match[1]);
+          if (output.includes('info depth 15')) {
+              const scoreMatches = output.matchAll(/score\s(\S+\s*\S*)/g);
+              for (const match of scoreMatches) {
+                  score.push(match[1]);
+              }
+
+              const moveMatches = output.matchAll(/(?<=pv\s)([a-h][1-8][a-h][1-8](?:\s[a-h][1-8][a-h][1-8])*)/g);
+              for (const match of moveMatches) {
+                  nextmove.push(match[1].split(" ")[0]);
+              }
           }
-          
-          const moveMatches = output.matchAll(/(?<=pv\s)([a-h][1-8][a-h][1-8](?:\s[a-h][1-8][a-h][1-8])*)/g);
-          for (const match of moveMatches) {
-            nextmove.push(match[1].split(" ")[0]);
+
+          if (output.includes('bestmove')) {
+              stockfish.stdout.off('data', onData);
+
+              const result = zip(nextmove, score);
+              const uniqueResult = Array.from(
+                  new Set(result.map(item => JSON.stringify(item)))
+              ).map(item => JSON.parse(item));
+
+              // console.log("Result: ",uniqueResult);
+              resolve(uniqueResult);
           }
-        }
-        
-        const result = zip(nextmove, score);    
-        const uniqueResult = Array.from(
-          new Set(result.map(item => JSON.stringify(item)))
-        ).map(item => JSON.parse(item));
+      };
 
+      stockfish.stdout.on('data', onData);
 
-        if (output.includes('bestmove')) {
-            console.log('Result:', uniqueResult);
-            resolve(uniqueResult);
-        }
-      });
-  
+      const timeout = setTimeout(() => {
+          stockfish.stdout.off('data', onData);
+          reject(new Error('Stockfish analysis timed out'));
+      }, 5000); 
 
       stockfish.stdin.write(`position fen ${fen}\n`);
       stockfish.stdin.write("go depth 15\n");
-    });
-  }
+  });
+}
+
 
 // analyzePosition(fen);  
 
